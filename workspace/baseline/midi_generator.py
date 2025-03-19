@@ -1,6 +1,4 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "4"
-
 import json
 import argparse
 import numpy as np
@@ -36,7 +34,9 @@ def sample_next(predictions, k):
     return predicted_id
 
 def process_init_text(model, init_text, char2idx, layer_idx, override):
-    model.reset_states()
+    #model.reset_states()
+
+    print(init_text)
 
     for c in init_text.split(" "):
         # Run a forward pass
@@ -44,12 +44,12 @@ def process_init_text(model, init_text, char2idx, layer_idx, override):
             input_eval = tf.expand_dims([char2idx[c]], 0)
 
             # override sentiment neurons
-            override_neurons(model, layer_idx, override)
+           # override_neurons(model, layer_idx, override)
 
             predictions = model(input_eval)
-        except KeyError:
+        except KeyError as b:
             if c != "":
-                print("Can't process char", s)
+                print("Can't process char", c, "because", b)
 
     return predictions
 
@@ -64,7 +64,7 @@ def generate_midi(model, char2idx, idx2char, init_text="", seq_len=256, k=3, lay
     predictions = process_init_text(model, init_text, char2idx, layer_idx, override)
 
     # Here batch size == 1
-    model.reset_states()
+   # model.reset_states()
     for i in range(seq_len):
         # remove the batch dimension
         predictions = tf.squeeze(predictions, 0).numpy()
@@ -76,27 +76,48 @@ def generate_midi(model, char2idx, idx2char, init_text="", seq_len=256, k=3, lay
         midi_generated.append(idx2char[predicted_id])
 
         # override sentiment neurons
-        override_neurons(model, layer_idx, override)
+       # override_neurons(model, layer_idx, override)
 
         #Run a new forward pass
         input_eval = tf.expand_dims([predicted_id], 0)
         predictions = model(input_eval)
 
+    midi_generated = remove_large_w_tokens(midi_generated, threshold=130)
     return init_text + " " + " ".join(midi_generated)
+
+def remove_large_w_tokens(generated_tokens, threshold=200):
+    """Remove tokens que comecem com 'w_' e número maior que 'threshold'."""
+    filtered_tokens = []
+    for token in generated_tokens:
+        if token.startswith("w_"):
+            # Caso seja "w_XXX", tentamos converter XXX em número:
+            try:
+                number_part = int(token.split("_")[1])
+                # Só mantemos se for menor ou igual ao threshold
+                if number_part <= threshold:
+                    filtered_tokens.append(token)
+            except ValueError:
+                # Se não conseguir converter em inteiro, apenas mantemos (ou descarta)
+                # Aqui vamos manter como default.
+                filtered_tokens.append(token)
+        else:
+            # Se não for "w_", mantemos
+            filtered_tokens.append(token)
+    return filtered_tokens
 
 if __name__ == "__main__":
 
     # Parse arguments
     parser = argparse.ArgumentParser(description='midi_generator.py')
-    parser.add_argument('--model', type=str, default='./trained', help="Checkpoint dir.")
-    parser.add_argument('--ch2ix', type=str, default='./trained/char2idx.json', help="JSON file with char2idx encoding.")
-    parser.add_argument('--embed', type=int, default=256, help="Embedding size.")
-    parser.add_argument('--units', type=int, default=512, help="LSTM units.")
-    parser.add_argument('--layers', type=int, default=4, help="LSTM layers.")
-    parser.add_argument('--seqinit', type=str, default="\n", help="Sequence init.")
-    parser.add_argument('--seqlen', type=int, default=512, help="Sequence lenght.")
-    parser.add_argument('--cellix', type=int, default=4, help="LSTM layer to use as encoder.")
-    parser.add_argument('--override', type=str, default="./trained/neurons_Q1.json", help="JSON file with neuron values to override.")
+    parser.add_argument('--model', type=str, required=True, help="Checkpoint dir.")
+    parser.add_argument('--ch2ix', type=str, required=True, help="JSON file with char2idx encoding.")
+    parser.add_argument('--embed', type=int, required=True, help="Embedding size.")
+    parser.add_argument('--units', type=int, required=True, help="LSTM units.")
+    parser.add_argument('--layers', type=int, required=True, help="LSTM layers.")
+    parser.add_argument('--seqinit', type=str, default="t_120", help="Sequence init.")
+    parser.add_argument('--seqlen', type=int, default=256, help="Sequence lenght.")
+    parser.add_argument('--cellix', type=int, default=-2, help="LSTM layer to use as encoder.")
+    parser.add_argument('--override', type=str, default="", help="JSON file with neuron values to override.")
     opt = parser.parse_args()
 
     # Load char2idx dict from json file
@@ -120,16 +141,11 @@ if __name__ == "__main__":
 
     # Rebuild model from checkpoint
     model = build_generative_model(vocab_size, opt.embed, opt.units, opt.layers, batch_size=1)
-    model.load_weights(tf.train.latest_checkpoint(opt.model))
-    model.build(tf.TensorShape([1, None]))
+    model.load_weights("trained/generative_ckpt_10.weights.h5")
+    model.build(tf.TensorShape([1,0]))
 
-    if not os.path.exists(GENERATED_DIR):
-        os.makedirs(GENERATED_DIR)
-    # Generate 5 midis
-    for i in range(100):
-        # Generate a midi as text
-        print("Generate midi {}".format(i))
-        midi_txt = generate_midi(model, char2idx, idx2char, opt.seqinit, opt.seqlen, layer_idx=opt.cellix, override=override)
-        
+    # Generate a midi as text
+    midi_txt = generate_midi(model, char2idx, idx2char, opt.seqinit, opt.seqlen, layer_idx=opt.cellix, override=override)
+    print(midi_txt)
 
-        me.write(midi_txt, os.path.join(GENERATED_DIR, "generated_Q1_{}.mid".format(i)))
+    me.write(midi_txt, os.path.join(GENERATED_DIR, "generated.mid"))

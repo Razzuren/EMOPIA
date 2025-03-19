@@ -1,35 +1,29 @@
 import os
-#os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"\
-os.environ["CUDA_VISIBLE_DEVICES"] = '4'
 import json
 import argparse
 import numpy      as np
 import tensorflow as tf
-import numpy as np
-
 
 import midi_encoder as me
 
 # Directory where the checkpoints will be saved
-TRAIN_DIR = "./trained/"
-
-#print('Version: ', tf.__version__)
-#print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
-#print("Check: ", tf.test.is_gpu_available(cuda_only=False, min_cuda_compute_capability=None))
-
+TRAIN_DIR = "./trained"
+seq_length = 0
 
 def generative_loss(labels, logits):
     return tf.keras.losses.sparse_categorical_crossentropy(labels, logits, from_logits=True)
 
 def build_generative_model(vocab_size, embed_dim, lstm_units, lstm_layers, batch_size, dropout=0):
     model = tf.keras.Sequential()
+    model.add(tf.keras.Input(shape=(seq_length,), batch_size=batch_size))
 
-    model.add(tf.keras.layers.Embedding(vocab_size, embed_dim, batch_input_shape=[batch_size, None]))
+    model.add(tf.keras.layers.Embedding(vocab_size, embed_dim))
 
     for i in range(max(1, lstm_layers)):
         model.add(tf.keras.layers.LSTM(lstm_units, return_sequences=True, stateful=True, dropout=dropout, recurrent_dropout=dropout))
 
     model.add(tf.keras.layers.Dense(vocab_size))
+    print(model.summary())
 
     return model
 
@@ -50,16 +44,29 @@ def build_char2idx(train_vocab, test_vocab):
 
     return char2idx, vocab_size
 
+
 def build_dataset(text, char2idx, seq_length, batch_size, buffer_size=10000):
-    text_as_int = np.array([char2idx[c] for c in text.split(" ")])
+    if not text.strip():
+        print("Erro: O texto está vazio!")
+        return tf.data.Dataset.from_tensor_slices([])
+
+    text_as_int = np.array([char2idx[c] for c in text.split(" ") if c.strip() != ""])
+
+    if len(text_as_int) == 0:
+        print("Erro: Nenhum token foi convertido para índice!")
+        return tf.data.Dataset.from_tensor_slices([])
+
+    print(f"Tamanho do array text_as_int: {len(text_as_int)}")
+
     char_dataset = tf.data.Dataset.from_tensor_slices(text_as_int)
 
-    sequences = char_dataset.batch(seq_length+1, drop_remainder=True)
+    sequences = char_dataset.batch(seq_length + 1, drop_remainder=True)
 
     dataset = sequences.map(__split_input_target)
     dataset = dataset.shuffle(buffer_size).batch(batch_size, drop_remainder=True)
 
     return dataset
+
 
 def train_generative_model(model, train_dataset, test_dataset, epochs, learning_rate):
     # Compile model with given optimizer and defined loss
@@ -67,12 +74,10 @@ def train_generative_model(model, train_dataset, test_dataset, epochs, learning_
     model.compile(optimizer=optimizer, loss=generative_loss)
 
     # Name of the checkpoint files
-    checkpoint_prefix = os.path.join(TRAIN_DIR, "generative_ckpt_{epoch}")
-    my_callbacks = [tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_prefix, save_weights_only=True),
-                    tf.keras.callbacks.EarlyStopping(monitor='val_loss', mode='min', patience=3, restore_best_weights=True)]
-    
-    
-    return model.fit(train_dataset, epochs=epochs, validation_data=test_dataset, callbacks=my_callbacks)
+    checkpoint_prefix = os.path.join(TRAIN_DIR, "generative_ckpt_{epoch}.weights.h5")
+    checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_prefix, save_weights_only=True)
+
+    return model.fit(train_dataset, epochs=epochs, validation_data=test_dataset, callbacks=[checkpoint_callback])
 
 def __split_input_target(chunk):
     input_text = chunk[:-1]
@@ -83,22 +88,20 @@ if __name__ == "__main__":
 
     # Parse arguments
     parser = argparse.ArgumentParser(description='train_generative.py')
-    parser.add_argument('--train', type=str, default='../data/train/', help="Train dataset.")
-    parser.add_argument('--test' , type=str, default='../data/test/', help="Test dataset.")
+    parser.add_argument('--train', type=str, required=True, help="Train dataset.")
+    parser.add_argument('--test' , type=str, required=True, help="Test dataset.")
     parser.add_argument('--model', type=str, required=False, help="Checkpoint dir.")
     parser.add_argument('--embed', type=int, default=256, help="Embedding size.")
     parser.add_argument('--units', type=int, default=512, help="LSTM units.")
-    parser.add_argument('--layers', type=int, default=4, help="LSTM layers.")
+    parser.add_argument('--layers', type=int, default=2, help="LSTM layers.")
     parser.add_argument('--batch', type=int, default=64, help="Batch size.")
-    parser.add_argument('--epochs', type=int, default=30, help="Epochs.")
-    parser.add_argument('--seqlen', type=int, default=256, help="Sequence lenght.")
-    parser.add_argument('--lrate', type=float, default=0.00001, help="Learning rate.")
-    parser.add_argument('--drop', type=float, default=0.05, help="Dropout.")
+    parser.add_argument('--epochs', type=int, default=10, help="Epochs.")
+    parser.add_argument('--seqlen', type=int, default=100, help="Sequence lenght.")
+    parser.add_argument('--lrate', type=float, default=0.001, help="Learning rate.")
+    parser.add_argument('--drop', type=float, default=0.0, help="Dropout.")
     opt = parser.parse_args()
 
-    if not os.path.exists(TRAIN_DIR):
-        os.makedirs(TRAIN_DIR)
-    
+    seq_length = opt.seqlen
     # Encode midi files as text with vocab
     train_text, train_vocab = me.load(opt.train)
     test_text, test_vocab = me.load(opt.test)
@@ -115,11 +118,8 @@ if __name__ == "__main__":
 
     if opt.model:
         # If pre-trained model was given as argument, load weights from disk
-        print("Loading weights from {}...".format(opt.model))
-        generative_model.load_weights(tf.train.latest_checkpoint(opt.model))
+        print("Loading weights...")
+        generative_model.load_weights("trained/generative_ckpt_10.weights.h5")
 
     # Train model
     history = train_generative_model(generative_model, train_dataset, test_dataset, opt.epochs, opt.lrate)
-    print("Total of {} epochs used for training.".format(len(history.history['loss'])))
-    loss_hist = history.history['loss']
-    print("Best loss from history: ", np.min(loss_hist))

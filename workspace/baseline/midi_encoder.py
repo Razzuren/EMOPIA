@@ -15,39 +15,37 @@ MAX_TEMPO = 160
 
 MAX_PITCH = 128
 
-def load(datapath, sample_freq=4, piano_range=(33, 93), transpose_range=10, stretching_range=10):
+def load(datapath):
     text = ""
     vocab = set()
 
     if os.path.isfile(datapath):
-        # Path is an individual midi file
-        file_extension = os.path.splitext(datapath)[1]
+        # Leitura de um único arquivo
+        with open(datapath, "r") as f:
+            text = f.read().strip()
+            vocab = set(text.split())  # Divide por espaço
 
-        if file_extension == ".midi" or file_extension == ".mid":
-            text = parse_midi(datapath, sample_freq, piano_range, transpose_range, stretching_range)
-            vocab = set(text.split(" "))
     else:
-        # Read every file in the given directory
+        # Leitura de múltiplos arquivos em um diretório
         for file in os.listdir(datapath):
             file_path = os.path.join(datapath, file)
             file_extension = os.path.splitext(file_path)[1]
 
-            # Check if it is not a directory and if it has either .midi or .mid extentions
-            if os.path.isfile(file_path) and (file_extension == ".midi" or file_extension == ".mid"):
-                encoded_midi = parse_midi(file_path, sample_freq, piano_range, transpose_range, stretching_range)
+            if os.path.isfile(file_path) and file_extension in [".txt", ".csv"]:
+                with open(file_path, "r") as f:
+                    content = f.read().strip()
+                    if content:
+                        words = set(content.split())
+                        vocab |= words  # Une o vocabulário
+                        text += content + " "
 
-                if len(encoded_midi) > 0:
-                    words = set(encoded_midi.split(" "))
-                    vocab = vocab | words
-
-                    text += encoded_midi + " "
-
-        # Remove last space
-        text = text[:-1]
+        text = text.strip()  # Remove espaços extras no final
 
     return text, vocab
 
+
 def parse_midi(file_path, sample_freq, piano_range, transpose_range, stretching_range):
+    print(f"Processing file: {file_path}")
 
     # Split datapath into dir and filename
     midi_dir = os.path.dirname(file_path)

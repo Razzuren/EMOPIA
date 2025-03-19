@@ -82,7 +82,7 @@ def build_dataset(datapath, generative_model, char2idx, layer_idx):
 
     return np.array(xs), np.array(ys)
 
-def train_classifier_model(train_dataset, test_dataset, C=2**np.arange(-8, 1).astype(np.float), seed=42, penalty="l1"):
+def train_classifier_model(train_dataset, test_dataset, C=2**np.arange(-8, 1).astype(np.float64), seed=42, penalty="l1"):
     trX, trY = train_dataset
     teX, teY = test_dataset
 

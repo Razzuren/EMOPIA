@@ -9,3 +9,5 @@ matplotlib
 scipy
 pickle
 
+midi_encoder.py --path midis --transp 10 --strech 10
+
