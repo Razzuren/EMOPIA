@@ -3,8 +3,8 @@ import json
 import argparse
 import numpy      as np
 import tensorflow as tf
-
 import midi_encoder as me
+from metrics import MetricsLogger
 
 # Directory where the checkpoints will be saved
 TRAIN_DIR = "./trained"
@@ -50,7 +50,7 @@ def build_dataset(text, char2idx, seq_length, batch_size, buffer_size=10000):
         print("Erro: O texto está vazio!")
         return tf.data.Dataset.from_tensor_slices([])
 
-    text_as_int = np.array([char2idx[c] for c in text.split(" ") if c.strip() != ""])
+    text_as_int = np.array([char2idx[c] for c in text.split() if c.strip() != ""])
 
     if len(text_as_int) == 0:
         print("Erro: Nenhum token foi convertido para índice!")
@@ -69,15 +69,24 @@ def build_dataset(text, char2idx, seq_length, batch_size, buffer_size=10000):
 
 
 def train_generative_model(model, train_dataset, test_dataset, epochs, learning_rate):
-    # Compile model with given optimizer and defined loss
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     model.compile(optimizer=optimizer, loss=generative_loss)
 
-    # Name of the checkpoint files
     checkpoint_prefix = os.path.join(TRAIN_DIR, "generative_ckpt_{epoch}.weights.h5")
-    checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_prefix, save_weights_only=True)
+    checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
+        filepath=checkpoint_prefix,
+        save_weights_only=True
+    )
 
-    return model.fit(train_dataset, epochs=epochs, validation_data=test_dataset, callbacks=[checkpoint_callback])
+    metrics_logger = MetricsLogger(model, learning_rate,
+                                   log_file=os.path.join(TRAIN_DIR, "training_metrics.csv"))
+
+    return model.fit(
+        train_dataset,
+        epochs=epochs,
+        validation_data=test_dataset,
+        callbacks=[checkpoint_callback, metrics_logger]
+    )
 
 def __split_input_target(chunk):
     input_text = chunk[:-1]
