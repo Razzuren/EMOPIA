@@ -11,9 +11,9 @@ import queue
 import mido
 import music21 as m21
 
+import midi_encoder as me
 from train_generative import build_generative_model
 from train_classifier import preprocess_sentence
-
 
 ###########################################
 # Conversão de tokens -> durações, eventos
@@ -22,13 +22,13 @@ from train_classifier import preprocess_sentence
 def parse_duration_token(token):
     """
     Ex.: 'd_quarter_1' => type='quarter', dots=1 => quarterLength=1.5
-         'd_16th_0'    => type='16th', dots=0 => quarterLength=0.25
+         'd_16th_0'    => type='16th',  dots=0 => quarterLength=0.25
     """
     parts = token.split("_")
     if len(parts) < 3:
-        return 0.25  # fallback
+        return 0.25
 
-    dur_type = parts[1]  # 'quarter'
+    dur_type = parts[1]
     try:
         dots = int(parts[2])
     except:
@@ -37,20 +37,17 @@ def parse_duration_token(token):
     d = m21.duration.Duration()
     d.type = dur_type
     d.dots = dots
-
-    q_len = d.quarterLength
-    return q_len
-
+    return d.quarterLength
 
 def tokens_to_events(tokens):
     """
-    Converte lista de tokens em lista de eventos (note_on, note_off, tempo).
+    Converte lista de tokens em lista de eventos (note_on, note_off).
     """
     events = []
     qn_offset = 0.0
     current_duration = 0.25
     current_velocity = 64
-    bpm = 65
+    bpm = 65  # fixo; se quiser dinâmica, implemente "t_"
 
     for token in tokens:
         token = token.strip()
@@ -58,7 +55,6 @@ def tokens_to_events(tokens):
             continue
 
         if token.startswith("w_"):
-            # w_X => avança X "ticks" no offset
             w_str = token.split("_")[1]
             try:
                 w_val = float(w_str)
@@ -76,13 +72,6 @@ def tokens_to_events(tokens):
             except:
                 pass
 
-        # elif token.startswith("t_"):
-        #     tempo_str = token.split("_")[1]
-        #     try:
-        #         bpm = float(tempo_str)
-        #     except:
-        #         bpm = 120.0
-
         elif token.startswith("n_"):
             pitch_str = token.split("_")[1]
             try:
@@ -91,31 +80,25 @@ def tokens_to_events(tokens):
                 pitch = 60
 
             start_sec = qn_offset * (60.0 / bpm)
-            end_sec = (qn_offset + current_duration) * (60.0 / bpm)
+            end_sec   = (qn_offset + current_duration) * (60.0 / bpm)
 
-            # note_on e note_off
             events.append(("note_on", pitch, current_velocity, start_sec))
             events.append(("note_off", pitch, current_velocity, end_sec))
 
-        else:
-            # ignora tokens desconhecidos
-            pass
+        # Se quiser suportar "t_", etc., implemente
 
-    # ordena por tempo
+    # Ordena eventos pelo tempo
     events.sort(key=lambda e: e[3])
     return events
 
-
 def play_events_realtime(events):
     """
-    Reproduz a lista de eventos em tempo real, usando time.sleep()
-    para sincronizar.
+    Toca os eventos em tempo real (time.sleep).
     """
     if not events:
         return
 
-    # Ajuste o nome da porta conforme seu sistema
-    port_name = "ehocarai 2"
+    port_name = "ehocarai 2"  # Ajuste conforme mido.get_output_names()
     outport = mido.open_output(port_name)
     print(f"[Tocadora] Tocando {len(events)} eventos na porta '{port_name}'.")
 
@@ -141,10 +124,10 @@ def play_events_realtime(events):
 # Thread 1 (Geradora): gera tokens em lotes (batches)
 ####################################################
 
-def sample_next(predictions, k):
+def sample_next(predictions, k=3):
     top_k = tf.math.top_k(predictions, k)
     top_k_choices = top_k[1].numpy().squeeze()
-    top_k_values = top_k[0].numpy().squeeze()
+    top_k_values  = top_k[0].numpy().squeeze()
 
     if np.random.uniform(0, 1) < 0.5:
         predicted_id = top_k_choices[0]
@@ -153,24 +136,28 @@ def sample_next(predictions, k):
         predicted_id = np.random.choice(top_k_choices[1:], p=p_choices)
     return predicted_id
 
-
 def generate_in_batches_thread(model, char2idx, idx2char, init_text,
                                batch_size, total_steps, k, out_queue,
-                               stop_event):
+                               stop_event,
+                               collector_queue=None):
     """
-    Gera tokens em lotes e coloca cada lote na fila 'out_queue'.
-    Quando terminar, coloca 'END' na fila.
+    Gera tokens em lotes e coloca cada lote na fila 'out_queue' para ser tocado.
+    Também pode armazenar os tokens num 'collector_queue' para salvar depois.
     """
     init_text = preprocess_sentence(init_text)
     predictions = None
 
-    # "Aquece" o modelo
+    # "aquece" o modelo
     for c in init_text.split():
         if c in char2idx:
             inp = tf.expand_dims([char2idx[c]], 0)
             predictions = model(inp)
 
     steps_so_far = 0
+    # Se quisermos registrar também os tokens iniciais
+    if collector_queue and init_text.strip():
+        collector_queue.put(init_text.split())
+
     while steps_so_far < total_steps and not stop_event.is_set():
         block_size = min(batch_size, total_steps - steps_so_far)
         block_tokens = []
@@ -178,6 +165,7 @@ def generate_in_batches_thread(model, char2idx, idx2char, init_text,
         for _ in range(block_size):
             if stop_event.is_set():
                 break
+
             preds_np = tf.squeeze(predictions, 0).numpy()
             pred_id = sample_next(preds_np, k)
             token = idx2char[pred_id]
@@ -187,12 +175,22 @@ def generate_in_batches_thread(model, char2idx, idx2char, init_text,
             predictions = model(inp)
 
         steps_so_far += block_size
+
         if block_tokens:
+            # Envia tokens para a Tocadora
             out_queue.put(block_tokens)
 
-    # Sinaliza fim
+            # Se quisermos salvar, enviamos também ao collector
+            if collector_queue:
+                collector_queue.put(block_tokens)
+
+    # Ao final, sinaliza fim para Tocadora
     out_queue.put("END")
-    print("[Geradora] Fim da geração. Coloquei 'END' na fila.")
+    print("[Geradora] Fim da geração. Inseriu 'END' na fila.")
+
+    # E também sinaliza no collector
+    if collector_queue:
+        collector_queue.put("END")
 
 
 ###################################################################
@@ -214,9 +212,7 @@ def play_thread(in_queue, stop_event):
             print("[Tocadora] Recebeu 'END', encerrando.")
             break
 
-        # converte tokens em eventos
         events = tokens_to_events(block)
-        # toca em tempo real
         play_events_realtime(events)
 
     print("[Tocadora] Thread finalizada.")
@@ -225,7 +221,6 @@ def play_thread(in_queue, stop_event):
 ##################
 # Script principal
 ##################
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='batch_realtime_generator_multithread')
     parser.add_argument('--model', type=str, required=True)
@@ -237,8 +232,6 @@ if __name__ == "__main__":
     parser.add_argument('--totalsteps', type=int, default=256)
     parser.add_argument('--batchsize', type=int, default=50)
     parser.add_argument('--k', type=int, default=3)
-    parser.add_argument('--cellix', type=int, default=-2)
-    parser.add_argument('--override', type=str, default="")
     opt = parser.parse_args()
 
     # Carrega char2idx
@@ -247,29 +240,35 @@ if __name__ == "__main__":
     idx2char = {v: k for k, v in char2idx.items()}
 
     # Carrega modelo
-    model = build_generative_model(len(char2idx), opt.embed, opt.units, opt.layers, batch_size=1)
+    vocab_size = len(char2idx)
+    model = build_generative_model(vocab_size, opt.embed, opt.units, opt.layers, batch_size=1)
     model.load_weights(opt.model)
     model.build(tf.TensorShape([1, 0]))
 
-    # Filtra override se precisar (não implementado neste script, mas poderia)
-    # ...
+    # Pasta de saída
+    GENERATED_DIR = "./generated"
+    os.makedirs(GENERATED_DIR, exist_ok=True)
+
+    # Marca tempo inicial
+    start_time = time.time()
 
     # Cria fila e event
-    q = queue.Queue()
+    q_play = queue.Queue()        # Para enviar tokens -> Tocadora
+    q_collect = queue.Queue()     # Para coletar todos os tokens e salvar depois
     stop_event = threading.Event()
 
     # Cria threads
     t_gen = threading.Thread(
         target=generate_in_batches_thread,
-        args=(model, char2idx, idx2char, opt.seqinit,
-              opt.batchsize, opt.totalsteps, opt.k,
-              q, stop_event),
+        args=(model, char2idx, idx2char,
+              opt.seqinit, opt.batchsize, opt.totalsteps, opt.k,
+              q_play, stop_event, q_collect),
         daemon=True
     )
 
     t_play = threading.Thread(
         target=play_thread,
-        args=(q, stop_event),
+        args=(q_play, stop_event),
         daemon=True
     )
 
@@ -281,4 +280,41 @@ if __name__ == "__main__":
     t_gen.join()
     t_play.join()
 
+    end_time = time.time()
+    total_time = end_time - start_time
+    avg_time_per_token = total_time / opt.totalsteps
+
     print("=== Fim da execução ===")
+
+    # Agora, vamos recolher todos os tokens do q_collect e montar um único texto
+    all_tokens = []
+    while not q_collect.empty():
+        item = q_collect.get()
+        if item == "END":
+            # Sinal de que a geradora acabou
+            continue
+        elif isinstance(item, list):
+            # São tokens
+            all_tokens.extend(item)
+        elif isinstance(item, str):
+            # Pode ser init_text
+            all_tokens.extend(item.split())
+
+    # Converte para string
+    final_text = " ".join(all_tokens)
+    print("Total de tokens coletados:", len(all_tokens))
+
+    # Salva .mid
+    midi_path = os.path.join(GENERATED_DIR, "generated_realtime.mid")
+    me.write(final_text, midi_path)
+    print(f"MIDI salvo em: {midi_path}")
+
+    # Salva métricas
+    timestamp = datetime.datetime.now().strftime("%d%m%Y%H%M")
+    metrics_filename = f"{timestamp}_generation_metrics.txt"
+    metrics_path = os.path.join(GENERATED_DIR, metrics_filename)
+    with open(metrics_path, "w") as f:
+        f.write(f"Total generation time (seconds): {total_time}\n")
+        f.write(f"Average time per token (seconds): {avg_time_per_token}\n")
+
+    print(f"Métricas de geração salvas em: {metrics_path}")
