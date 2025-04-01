@@ -1,3 +1,4 @@
+import datetime
 import os
 import json
 import argparse
@@ -78,8 +79,14 @@ def train_generative_model(model, train_dataset, test_dataset, epochs, learning_
         save_weights_only=True
     )
 
-    metrics_logger = MetricsLogger(model, learning_rate,
-                                   log_file=os.path.join(TRAIN_DIR, "training_metrics.csv"))
+    timestamp = datetime.datetime.now().strftime("%d%m%Y%H%M")
+    metrics_filename = f"{timestamp}_training_metrics.csv"
+
+    # Exemplo de como usar esse nome em seu MetricsLogger
+    metrics_logger = MetricsLogger(model,
+        learning_rate,
+        log_file=os.path.join(TRAIN_DIR, metrics_filename)
+    )
 
     return model.fit(
         train_dataset,
@@ -128,7 +135,7 @@ if __name__ == "__main__":
     if opt.model:
         # If pre-trained model was given as argument, load weights from disk
         print("Loading weights...")
-        generative_model.load_weights("trained/generative_ckpt_10.weights.h5")
+        generative_model.load_weights(opt.model)
 
     # Train model
     history = train_generative_model(generative_model, train_dataset, test_dataset, opt.epochs, opt.lrate)

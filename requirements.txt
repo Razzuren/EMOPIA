@@ -1,13 +1,12 @@
-scikit-learn==0.24.1
-seaborn==0.11.1
-numpy==1.19.5
+scikit-learn
+seaborn
+numpy
 miditoolkit==0.1.14
-pandas==1.1.5
+pandas
 ipdb
 tqdm
 matplotlib
 scipy
-pickle
-
-midi_encoder.py --path midis --transp 10 --strech 10
+mido
+python-rtmidi
 

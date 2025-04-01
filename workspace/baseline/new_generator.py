@@ -1,6 +1,9 @@
+import datetime
 import os
 import json
 import argparse
+import time
+
 import numpy as np
 import tensorflow as tf
 import midi_encoder as me
@@ -130,9 +133,36 @@ if __name__ == "__main__":
     model.load_weights(opt.model)
     model.build(tf.TensorShape([1,0]))
 
-    # Gera
-    midi_txt = generate_midi(model, char2idx, idx2char, opt.seqinit, opt.seqlen, layer_idx=opt.cellix, override=override)
+    start_time = time.time()
+    midi_txt = generate_midi(
+        model,
+        char2idx,
+        idx2char,
+        opt.seqinit,
+        opt.seqlen,
+        layer_idx=opt.cellix,
+        override=override
+    )
+    end_time = time.time()
+
+    total_time = end_time - start_time
+    avg_time_per_token = total_time / opt.seqlen
+
     print("Tokens Gerados:", midi_txt)
+    out_path = os.path.join(GENERATED_DIR, "generated.mid")
+    me.write(midi_txt, out_path)
+    print(f"MIDI salvo em: {out_path}")
+
+    # === Salvar métricas em arquivo com timestamp ===
+    timestamp = datetime.datetime.now().strftime("%d%m%Y%H%M")
+    metrics_filename = f"{timestamp}_generation_metrics.txt"
+    metrics_path = os.path.join(GENERATED_DIR, metrics_filename)
+
+    with open(metrics_path, "w") as f:
+        f.write(f"Total generation time (seconds): {total_time}\n")
+        f.write(f"Average time per token (seconds): {avg_time_per_token}\n")
+
+    print(f"Métricas de geração salvas em: {metrics_path}")
 
     # Escreve arquivo .mid
     out_path = os.path.join(GENERATED_DIR, "generated.mid")
