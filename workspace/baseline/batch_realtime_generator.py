@@ -304,6 +304,21 @@ if __name__ == "__main__":
     final_text = " ".join(all_tokens)
     print("Total de tokens coletados:", len(all_tokens))
 
+    tokens = final_text.split()
+    found_first_t = False
+    filtered_tokens = []
+
+    for tok in tokens:
+        if tok.startswith("t_"):
+            if not found_first_t:
+                filtered_tokens.append(tok)  # mantém o primeiro t_
+                found_first_t = True
+            # senão descarta
+        else:
+            filtered_tokens.append(tok)
+
+    final_text_filtered = " ".join(filtered_tokens)
+
     # Salva .mid
     midi_path = os.path.join(GENERATED_DIR, "generated_realtime.mid")
     me.write(final_text, midi_path)

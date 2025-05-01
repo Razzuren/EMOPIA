@@ -40,8 +40,8 @@ parser.add_argument("--exp_name", default='output' , type=str)
 parser.add_argument("--load_ckt", default="none", type=str)   #pre-train model
 parser.add_argument("--load_ckt_loss", default="25", type=str)     #pre-train model
 parser.add_argument("--path_train_data", default='emopia', type=str)  
-parser.add_argument("--data_root", default='../dataset/co-representation/', type=str)
-parser.add_argument("--load_dict", default="more_dictionary.pkl", type=str)
+parser.add_argument("--data_root", default='./co-representation/', type=str)
+parser.add_argument("--load_dict", default="dictionary.pkl", type=str)
 parser.add_argument("--init_lr", default= 0.00001, type=float)
 # inference config
 
@@ -67,7 +67,7 @@ path_data_root = args.data_root
 path_train_data = os.path.join(path_data_root, args.path_train_data + '_data.npz')
 path_dictionary =  os.path.join(path_data_root, args.load_dict)
 path_train_idx = os.path.join(path_data_root, args.path_train_data + '_fn2idx_map.json')
-path_train_data_cls_idx = os.path.join(path_data_root, args.path_train_data + '_data_idx.npz')
+path_train_data_cls_idx = os.path.join(path_data_root, args.path_train_data + '_idx.npz')
 
 assert os.path.exists(path_train_data)
 assert os.path.exists(path_dictionary)
@@ -99,7 +99,7 @@ if args.load_ckt == 'none':
 else:
     info_load_model = (
         # path to ckpt for loading
-        'exp/' + args.load_ckt,
+        args.load_ckt,
         # loss
         args.load_ckt_loss                               
         )

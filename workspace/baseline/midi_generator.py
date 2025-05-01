@@ -141,7 +141,7 @@ if __name__ == "__main__":
 
     # Rebuild model from checkpoint
     model = build_generative_model(vocab_size, opt.embed, opt.units, opt.layers, batch_size=1)
-    model.load_weights("trained/generative_ckpt_10.weights.h5")
+    model.load_weights("trained/generative_ckpt_3.weights.h5")
     model.build(tf.TensorShape([1,0]))
 
     # Generate a midi as text
