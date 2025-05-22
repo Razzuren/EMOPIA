@@ -141,7 +141,7 @@ def sampling(logit, p=None, t=1.0, is_training=False):
         return torch.argmax(probs)
         
     else:
-        logit = logit.squeeze().cpu().numpy()
+        logit = logit.squeeze().detach().cpu().numpy()
         probs = softmax_with_temperature(logits=logit, temperature=t)
     
         if probs is None:

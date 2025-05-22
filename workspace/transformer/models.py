@@ -19,6 +19,15 @@ N_HEAD = 8
 ################################################################################
 # Model
 ################################################################################
+def _memory_batch(mem):
+    """Retorna o tamanho de batch armazenado no objeto `memory`."""
+    if isinstance(mem, (tuple, list)):
+        # Ex.: [(K1,V1), (K2,V2)…]  – pega o 1º tensor do 1º par
+        first = mem[0][0] if isinstance(mem[0], (tuple, list)) else mem[0]
+        return first.shape[0]  # dim-0 é batch
+    else:
+        return mem.shape[0]  # fallback: único tensor
+
 
 def network_paras(model):
     # compute only trainable params
@@ -54,8 +63,6 @@ class PositionalEncoding(nn.Module):
     def forward(self, x):
         x = x + self.pe[:, :x.size(1), :]
         return self.dropout(x)
-
-
 
 class TransformerModel(nn.Module):
     def __init__(self, n_token, is_training=True, data_parallel=False):
@@ -292,13 +299,14 @@ class TransformerModel(nn.Module):
             
             # self.get_encoder('autoregred')
             # self.transformer_encoder.cuda()
+            if memory is not None and x.size(0) != _memory_batch(memory):
+                memory = None
             h, memory = self.transformer_encoder(pos_emb, memory=memory) # y: s x d_model
             
             # project type
             y_type = self.proj_type(h)
             
             return h, y_type, memory
-
 
     def forward_output(self, h, y):
         '''
